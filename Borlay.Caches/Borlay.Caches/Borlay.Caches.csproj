@@ -10,6 +10,7 @@
     <RepositoryUrl>https://github.com/Borlay/Borlay.Caches.git</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
     <PackageTags>Limited Cache Key value</PackageTags>
+    <Version>1.0.2</Version>
   </PropertyGroup>
 
 </Project>

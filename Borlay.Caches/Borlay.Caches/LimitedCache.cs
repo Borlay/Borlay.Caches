@@ -86,6 +86,15 @@ namespace Borlay.Caches
             }
         }
 
+        protected virtual void AddNew(TKey key, TValue value)
+        {
+            var newnode = new Node<TKey, TValue>(key, value);
+            AddNode(newnode);
+            dictionary[key] = newnode;
+
+            Clear(Capacity);
+        }
+
         public void Set(TKey key, TValue value)
         {
             lock (this)
@@ -99,16 +108,12 @@ namespace Borlay.Caches
                 }
                 else
                 {
-                    var newnode = new Node<TKey, TValue>(key, value);
-                    AddNode(newnode);
-                    dictionary[key] = newnode;
-
-                    Clear(Capacity);
+                    AddNew(key, value);
                 }
             }
         }
 
-        public bool TryGet(TKey key, out TValue value)
+        public bool TryGetValue(TKey key, out TValue value)
         {
             lock (this)
             {
@@ -122,6 +127,40 @@ namespace Borlay.Caches
 
                 value = default(TValue);
                 return false;
+            }
+        }
+
+        public TValue ResolveValue(TKey key, Func<TKey, TValue> resolve)
+        {
+            lock (this)
+            {
+                if (dictionary.TryGetValue(key, out var node))
+                {
+                    RemoveNode(node);
+                    AddNode(node);
+                    return node.Value;
+                }
+                else
+                {
+                    var resolvedValue = resolve(key);
+                    AddNew(key, resolvedValue);
+                    return resolvedValue;
+                }
+            }
+        }
+
+        public TValue this[TKey key]
+        {
+            set
+            {
+                Set(key, value);
+            }
+            get
+            {
+                if (TryGetValue(key, out var value))
+                    return value;
+
+                throw new KeyNotFoundException($"Key '{key}' not found in the {nameof(LimitedCache<TKey, TValue>)}");
             }
         }
     }
