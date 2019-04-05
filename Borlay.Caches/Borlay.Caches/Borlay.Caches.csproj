@@ -2,6 +2,14 @@
 
   <PropertyGroup>
     <TargetFramework>netstandard1.2</TargetFramework>
+    <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
+    <Authors>Paulius Kanoverskis</Authors>
+    <Copyright>Paulius Kanoverskis</Copyright>
+    <PackageLicenseUrl>https://github.com/Borlay/Borlay.Caches/blob/master/LICENSE</PackageLicenseUrl>
+    <PackageProjectUrl>http://borlay.org</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/Borlay/Borlay.Caches.git</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageTags>Limited Cache Key value</PackageTags>
   </PropertyGroup>
 
 </Project>
