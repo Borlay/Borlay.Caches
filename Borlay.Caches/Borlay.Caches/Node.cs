@@ -14,10 +14,13 @@ namespace Borlay.Caches
 
         public TValue Value { get; set; }
 
+        public DateTime UpdateTime { get; set; }
+
         public Node(TKey key, TValue value)
         {
             this.Key = key;
             this.Value = value;
+            this.UpdateTime = DateTime.Now;
         }
 
         public override bool Equals(object obj)

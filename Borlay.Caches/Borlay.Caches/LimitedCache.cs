@@ -9,14 +9,22 @@ namespace Borlay.Caches
         Node<TKey, TValue> first = null;
         Node<TKey, TValue> last = null;
 
+        public TimeSpan EntityExpireIn { get; set; }
 
         public int Capacity { get; }
 
         public int Count => dictionary.Count;
 
         public LimitedCache(int capacity)
+            : this(capacity, TimeSpan.FromHours(1))
+        {
+
+        }
+
+        public LimitedCache(int capacity, TimeSpan entityExpireIn)
         {
             this.Capacity = capacity;
+            this.EntityExpireIn = entityExpireIn;
         }
 
         protected virtual void AddNode(Node<TKey, TValue> node)
@@ -104,6 +112,7 @@ namespace Borlay.Caches
                     RemoveNode(node);
                     AddNode(node);
                     node.Value = value;
+                    node.UpdateTime = DateTime.Now;
                     return;
                 }
                 else
@@ -119,10 +128,18 @@ namespace Borlay.Caches
             {
                 if (dictionary.TryGetValue(key, out var node))
                 {
-                    RemoveNode(node);
-                    AddNode(node);
-                    value = node.Value;
-                    return true;
+                    if(DateTime.Now.Subtract(node.UpdateTime) < EntityExpireIn)
+                    {
+                        RemoveNode(node);
+                        AddNode(node);
+                        value = node.Value;
+                        return true;
+                    }
+                    else
+                    {
+                        dictionary.Remove(key);
+                        RemoveNode(node);
+                    }
                 }
 
                 value = default(TValue);
@@ -136,9 +153,22 @@ namespace Borlay.Caches
             {
                 if (dictionary.TryGetValue(key, out var node))
                 {
-                    RemoveNode(node);
-                    AddNode(node);
-                    return node.Value;
+                    if (DateTime.Now.Subtract(node.UpdateTime) < EntityExpireIn)
+                    {
+                        RemoveNode(node);
+                        AddNode(node);
+                        return node.Value;
+                    }
+                    else
+                    {
+                        var resolvedValue = resolve(key);
+
+                        RemoveNode(node);
+                        AddNode(node);
+                        node.Value = resolvedValue;
+                        node.UpdateTime = DateTime.Now;
+                        return resolvedValue;
+                    }
                 }
                 else
                 {
