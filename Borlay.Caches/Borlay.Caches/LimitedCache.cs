@@ -3,11 +3,13 @@ using System.Collections.Generic;
 
 namespace Borlay.Caches
 {
-    public class LimitedCache<TKey, TValue>
+    public class LimitedCache<TKey, TValue> : ICacheResolve<TKey, TValue>
     {
-        public Dictionary<TKey, Node<TKey, TValue>> dictionary = new Dictionary<TKey, Node<TKey, TValue>>();
-        Node<TKey, TValue> first = null;
-        Node<TKey, TValue> last = null;
+        private Dictionary<TKey, Node<TKey, TValue>> dictionary = new Dictionary<TKey, Node<TKey, TValue>>();
+        private Node<TKey, TValue> first = null;
+        private Node<TKey, TValue> last = null;
+
+        private Func<TKey, TValue> resolver = null;
 
         public TimeSpan EntityExpireIn { get; set; }
 
@@ -25,6 +27,14 @@ namespace Borlay.Caches
         {
             this.Capacity = capacity;
             this.EntityExpireIn = entityExpireIn;
+        }
+
+        public void SetResolver(Func<TKey, TValue> resolver)
+        {
+            lock (this)
+            {
+                this.resolver = resolver;
+            }
         }
 
         protected virtual void AddNode(Node<TKey, TValue> node)
@@ -122,33 +132,55 @@ namespace Borlay.Caches
             }
         }
 
-        public bool TryGetValue(TKey key, out TValue value)
+        public void Remove(TKey key)
         {
             lock (this)
             {
                 if (dictionary.TryGetValue(key, out var node))
                 {
-                    if(DateTime.Now.Subtract(node.UpdateTime) < EntityExpireIn)
-                    {
-                        RemoveNode(node);
-                        AddNode(node);
-                        value = node.Value;
-                        return true;
-                    }
-                    else
-                    {
-                        dictionary.Remove(key);
-                        RemoveNode(node);
-                    }
+                    RemoveNode(node);
+                    dictionary.Remove(key);
+                    return;
                 }
-
-                value = default(TValue);
-                return false;
             }
         }
 
-        public TValue ResolveValue(TKey key, Func<TKey, TValue> resolve)
+        /// <summary>
+        /// Tries to get value without resolving it.
+        /// </summary>
+        /// <param name="key">Key</param>
+        /// <param name="value">Value</param>
+        /// <returns></returns>
+        public bool TryGetValue(TKey key, out TValue value)
         {
+            return TryResolveValue(key, null, out value);
+            //lock (this)
+            //{
+            //    if (dictionary.TryGetValue(key, out var node))
+            //    {
+            //        if(DateTime.Now.Subtract(node.UpdateTime) < EntityExpireIn)
+            //        {
+            //            RemoveNode(node);
+            //            AddNode(node);
+            //            value = node.Value;
+            //            return true;
+            //        }
+            //        else
+            //        {
+            //            dictionary.Remove(key);
+            //            RemoveNode(node);
+            //        }
+            //    }
+
+            //    value = default(TValue);
+            //    return false;
+            //}
+        }
+
+        protected bool TryResolveValue(TKey key, Func<TKey, TValue> resolver, out TValue value)
+        {
+            value = default(TValue);
+
             lock (this)
             {
                 if (dictionary.TryGetValue(key, out var node))
@@ -157,27 +189,97 @@ namespace Borlay.Caches
                     {
                         RemoveNode(node);
                         AddNode(node);
-                        return node.Value;
+                        value = node.Value;
+                        return true;
                     }
                     else
                     {
-                        var resolvedValue = resolve(key);
+                        if (resolver == null)
+                        {
+                            dictionary.Remove(key);
+                            RemoveNode(node);
+                            return false;
+                        }
+                        var ResolveValuedValue = resolver(key);
 
                         RemoveNode(node);
                         AddNode(node);
-                        node.Value = resolvedValue;
+                        node.Value = ResolveValuedValue;
                         node.UpdateTime = DateTime.Now;
-                        return resolvedValue;
+                        value = ResolveValuedValue;
+                        return true;
                     }
                 }
                 else
                 {
-                    var resolvedValue = resolve(key);
-                    AddNew(key, resolvedValue);
-                    return resolvedValue;
+                    if (resolver == null) return false;
+                    var ResolveValuedValue = resolver(key);
+
+                    AddNew(key, ResolveValuedValue);
+                    value = ResolveValuedValue;
+                    return true;
                 }
             }
         }
+
+        /// <summary>
+        /// Tries to get value and if not exist tries to ResolveValue with ResolveValuer.
+        /// </summary>
+        /// <param name="key">Key</param>
+        /// <param name="value">Value</param>
+        /// <returns></returns>
+        public bool TryResolveValue(TKey key, out TValue value)
+        {
+            return TryResolveValue(key, this.resolver, out value);
+        }
+
+        public TValue ResolveValue(TKey key)
+        {
+            return ResolveValue(key, this.resolver);
+        }
+
+        public TValue ResolveValue(TKey key, Func<TKey, TValue> resolver)
+        {
+            if (resolver == null)
+                throw new ArgumentNullException(nameof(resolver));
+
+            if (TryResolveValue(key, resolver, out var value))
+                return value;
+            else
+                throw new Exception("Cannot ResolveValue value");
+        }
+
+        //public TValue ResolveValue(TKey key, Func<TKey, TValue> ResolveValuer)
+        //{
+        //    lock (this)
+        //    {
+        //        if (dictionary.TryGetValue(key, out var node))
+        //        {
+        //            if (DateTime.Now.Subtract(node.UpdateTime) < EntityExpireIn)
+        //            {
+        //                RemoveNode(node);
+        //                AddNode(node);
+        //                return node.Value;
+        //            }
+        //            else
+        //            {
+        //                var ResolveValuedValue = ResolveValuer(key);
+
+        //                RemoveNode(node);
+        //                AddNode(node);
+        //                node.Value = ResolveValuedValue;
+        //                node.UpdateTime = DateTime.Now;
+        //                return ResolveValuedValue;
+        //            }
+        //        }
+        //        else
+        //        {
+        //            var ResolveValuedValue = ResolveValuer(key);
+        //            AddNew(key, ResolveValuedValue);
+        //            return ResolveValuedValue;
+        //        }
+        //    }
+        //}
 
         public TValue this[TKey key]
         {
@@ -193,5 +295,15 @@ namespace Borlay.Caches
                 throw new KeyNotFoundException($"Key '{key}' not found in the {nameof(LimitedCache<TKey, TValue>)}");
             }
         }
+    }
+
+    public interface ICacheResolve<TKey, TValue>
+    {
+        void Set(TKey key, TValue value);
+
+        TValue ResolveValue(TKey key);
+        bool TryResolveValue(TKey key, out TValue value);
+
+        void Remove(TKey key);
     }
 }

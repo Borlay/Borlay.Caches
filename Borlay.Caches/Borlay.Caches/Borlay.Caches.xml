@@ -1,0 +1,29 @@
+<?xml version="1.0"?>
+<doc>
+    <assembly>
+        <name>Borlay.Caches</name>
+    </assembly>
+    <members>
+        <member name="M:Borlay.Caches.LimitedCache`2.RemoveOldest">
+            <summary>
+            Removes oldest used element
+            </summary>
+        </member>
+        <member name="M:Borlay.Caches.LimitedCache`2.TryGetValue(`0,`1@)">
+            <summary>
+            Tries to get value without resolving it.
+            </summary>
+            <param name="key">Key</param>
+            <param name="value">Value</param>
+            <returns></returns>
+        </member>
+        <member name="M:Borlay.Caches.LimitedCache`2.TryResolveValue(`0,`1@)">
+            <summary>
+            Tries to get value and if not exist tries to ResolveValue with ResolveValuer.
+            </summary>
+            <param name="key">Key</param>
+            <param name="value">Value</param>
+            <returns></returns>
+        </member>
+    </members>
+</doc>
