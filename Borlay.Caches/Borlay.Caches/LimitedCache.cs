@@ -5,9 +5,15 @@ namespace Borlay.Caches
 {
     public class LimitedCache<TKey, TValue> : ICacheResolve<TKey, TValue>
     {
-        private Dictionary<TKey, Node<TKey, TValue>> dictionary = new Dictionary<TKey, Node<TKey, TValue>>();
-        private Node<TKey, TValue> first = null;
-        private Node<TKey, TValue> last = null;
+        private Dictionary<TKey, ValueNode<TKey, TValue>> dictionary = new Dictionary<TKey, ValueNode<TKey, TValue>>();
+
+        private readonly LinkedNodes<TKey> usageLinked = new LinkedNodes<TKey>();
+
+        private readonly LinkedNodes<TKey> expireLinked = new LinkedNodes<TKey>();
+
+        LinkedDictionary<TKey, ValueNode<TKey, TValue>> linkedDictionary = new LinkedDictionary<TKey, ValueNode<TKey, TValue>>();
+
+        private Node<TKey> expirationNodes = null;
 
         private Func<TKey, TValue> resolver = null;
 
@@ -37,78 +43,36 @@ namespace Borlay.Caches
             }
         }
 
-        protected virtual void AddNode(Node<TKey, TValue> node)
-        {
-            if (first == null)
-            {
-                first = node;
-                last = node;
-                return;
-            }
-
-            last.Right = node;
-            node.Left = last;
-            last = node;
-        }
-
-        protected virtual void RemoveNode(Node<TKey, TValue> node)
-        {
-            var left = node.Left;
-            var right = node.Right;
-
-            node.Left = null;
-            node.Right = null;
-
-            if (left != null)
-                left.Right = right;
-
-            if (right != null)
-                right.Left = left;
-
-            if (node.Equals(last))
-            {
-                last = left;
-            }
-            else if (node.Equals(first))
-            {
-                first = right;
-            }
-
-            if (last == null || last == null)
-            {
-                first = null;
-                last = null;
-            }
-        }
-
-        /// <summary>
-        /// Removes oldest used element
-        /// </summary>
-        protected void RemoveOldest()
-        {
-            if (first == null) return;
-
-            var node = first;
-            dictionary.Remove(node.Key);
-            RemoveNode(node);
-        }
+        
 
         public void Clear(int capacity)
         {
             lock(this)
             {
+                foreach(var node in linkedDictionary.Ascending())
+                {
+                    if(linkedDictionary.Count > capacity)
+                    {
+                        linkedDictionary.Remove(node);
+                    }
+                }
+
                 while (dictionary.Count > capacity && dictionary.Count > 0)
                 {
-                    RemoveOldest();
+                    if (usageLinked.TryRemoveFirst(out var key))
+                        dictionary.Remove(key);
                 }
             }
         }
 
         protected virtual void AddNew(TKey key, TValue value)
         {
-            var newnode = new Node<TKey, TValue>(key, value);
-            AddNode(newnode);
+            var newnode = new ValueNode<TKey, TValue>(key, value);
+            usageLinked.AddNode(newnode);
             dictionary[key] = newnode;
+
+            var expNode = new Node<TKey>(key);
+            expireLinked.AddNode(expNode);
 
             Clear(Capacity);
         }
@@ -119,8 +83,8 @@ namespace Borlay.Caches
             {
                 if (dictionary.TryGetValue(key, out var node))
                 {
-                    RemoveNode(node);
-                    AddNode(node);
+                    usageLinked.RemoveNode(node);
+                    usageLinked.AddNode(node);
                     node.Value = value;
                     node.UpdateTime = DateTime.Now;
                     return;
@@ -138,7 +102,7 @@ namespace Borlay.Caches
             {
                 if (dictionary.TryGetValue(key, out var node))
                 {
-                    RemoveNode(node);
+                    usageLinked.RemoveNode(node);
                     dictionary.Remove(key);
                     return;
                 }
@@ -154,27 +118,6 @@ namespace Borlay.Caches
         public bool TryGetValue(TKey key, out TValue value)
         {
             return TryResolveValue(key, null, out value);
-            //lock (this)
-            //{
-            //    if (dictionary.TryGetValue(key, out var node))
-            //    {
-            //        if(DateTime.Now.Subtract(node.UpdateTime) < EntityExpireIn)
-            //        {
-            //            RemoveNode(node);
-            //            AddNode(node);
-            //            value = node.Value;
-            //            return true;
-            //        }
-            //        else
-            //        {
-            //            dictionary.Remove(key);
-            //            RemoveNode(node);
-            //        }
-            //    }
-
-            //    value = default(TValue);
-            //    return false;
-            //}
         }
 
         protected bool TryResolveValue(TKey key, Func<TKey, TValue> resolver, out TValue value)
@@ -187,8 +130,8 @@ namespace Borlay.Caches
                 {
                     if (DateTime.Now.Subtract(node.UpdateTime) < EntityExpireIn)
                     {
-                        RemoveNode(node);
-                        AddNode(node);
+                        usageLinked.RemoveNode(node);
+                        usageLinked.AddNode(node);
                         value = node.Value;
                         return true;
                     }
@@ -197,13 +140,13 @@ namespace Borlay.Caches
                         if (resolver == null)
                         {
                             dictionary.Remove(key);
-                            RemoveNode(node);
+                            usageLinked.RemoveNode(node);
                             return false;
                         }
                         var ResolveValuedValue = resolver(key);
 
-                        RemoveNode(node);
-                        AddNode(node);
+                        usageLinked.RemoveNode(node);
+                        usageLinked.AddNode(node);
                         node.Value = ResolveValuedValue;
                         node.UpdateTime = DateTime.Now;
                         value = ResolveValuedValue;
@@ -248,38 +191,6 @@ namespace Borlay.Caches
             else
                 throw new Exception("Cannot ResolveValue value");
         }
-
-        //public TValue ResolveValue(TKey key, Func<TKey, TValue> ResolveValuer)
-        //{
-        //    lock (this)
-        //    {
-        //        if (dictionary.TryGetValue(key, out var node))
-        //        {
-        //            if (DateTime.Now.Subtract(node.UpdateTime) < EntityExpireIn)
-        //            {
-        //                RemoveNode(node);
-        //                AddNode(node);
-        //                return node.Value;
-        //            }
-        //            else
-        //            {
-        //                var ResolveValuedValue = ResolveValuer(key);
-
-        //                RemoveNode(node);
-        //                AddNode(node);
-        //                node.Value = ResolveValuedValue;
-        //                node.UpdateTime = DateTime.Now;
-        //                return ResolveValuedValue;
-        //            }
-        //        }
-        //        else
-        //        {
-        //            var ResolveValuedValue = ResolveValuer(key);
-        //            AddNew(key, ResolveValuedValue);
-        //            return ResolveValuedValue;
-        //        }
-        //    }
-        //}
 
         public TValue this[TKey key]
         {

@@ -1,6 +1,7 @@
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using System;
 using System.Diagnostics;
+using System.Linq;
 using System.Threading;
 
 namespace Borlay.Caches.Tests
@@ -8,6 +9,72 @@ namespace Borlay.Caches.Tests
     [TestClass]
     public class CacheTests
     {
+        [TestMethod]
+        public void LinkedAscDescTest()
+        {
+            var linked = new LinkedNodes<int>();
+
+            linked.AddNode(new Node<int>(2));
+            linked.AddNode(new Node<int>(3));
+            linked.AddNode(new Node<int>(4));
+
+            var asc = linked.Ascending().ToArray();
+            var desc = linked.Descending().ToArray();
+
+            Assert.AreEqual(3, asc.Count());
+            Assert.AreEqual(3, desc.Count());
+
+            Assert.AreEqual(2, asc[0].Key);
+            Assert.AreEqual(3, asc[1].Key);
+            Assert.AreEqual(4, asc[2].Key);
+
+            Assert.AreEqual(4, desc[0].Key);
+            Assert.AreEqual(3, desc[1].Key);
+            Assert.AreEqual(2, desc[2].Key);
+        }
+
+        [TestMethod]
+        public void LinkedRemoveFirstAscDescTest()
+        {
+            var linked = new LinkedNodes<int>();
+
+            linked.AddNode(new Node<int>(2));
+            linked.AddNode(new Node<int>(3));
+
+            linked.TryRemoveFirst(out var key);
+
+            Assert.AreEqual(2, key);
+
+            var asc = linked.Ascending().ToArray();
+            var desc = linked.Descending().ToArray();
+
+            Assert.AreEqual(1, asc.Count());
+            Assert.AreEqual(3, asc[0].Key);
+            Assert.AreEqual(3, desc[0].Key);
+        }
+
+        [TestMethod]
+        public void LinkedRemoveLastAscDescTest()
+        {
+            var linked = new LinkedNodes<int>();
+
+            linked.AddNode(new Node<int>(2));
+            linked.AddNode(new Node<int>(3));
+
+            linked.TryRemoveLast(out var key);
+
+            Assert.AreEqual(3, key);
+
+            var asc = linked.Ascending().ToArray();
+            var desc = linked.Descending().ToArray();
+
+            Assert.AreEqual(1, asc.Count());
+            Assert.AreEqual(1, desc.Count());
+
+            Assert.AreEqual(2, asc[0].Key);
+            Assert.AreEqual(2, desc[0].Key);
+        }
+
         [TestMethod]
         public void LimitedCacheTest()
         {
