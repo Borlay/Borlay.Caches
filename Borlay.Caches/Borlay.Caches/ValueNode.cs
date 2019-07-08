@@ -4,7 +4,7 @@ using System.Text;
 
 namespace Borlay.Caches
 {
-    public class Node<TKey>
+    public class Node<TKey> : IValueAge<TKey>
     {
         public Node<TKey> Left { get; set; }
 

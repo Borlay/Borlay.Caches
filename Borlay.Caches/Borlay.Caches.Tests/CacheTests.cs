@@ -204,7 +204,7 @@ namespace Borlay.Caches.Tests
 
             watch.Stop();
 
-            // 100k 1.3s
+            // 100k*10 2.7s
 
         }
     }

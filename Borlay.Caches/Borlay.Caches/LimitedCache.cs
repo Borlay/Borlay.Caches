@@ -1,92 +1,89 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Linq;
+using System.Threading.Tasks;
 
 namespace Borlay.Caches
 {
-    public class LimitedCache<TKey, TValue> : ICacheResolve<TKey, TValue>
+    public class LimitedCache<TKey, TValue> : ICache<TKey, TValue>, ICacheRefresh<TKey, TValue>
     {
-        private Dictionary<TKey, ValueNode<TKey, TValue>> dictionary = new Dictionary<TKey, ValueNode<TKey, TValue>>();
+        public event Action<ICacheRefresh<TKey, TValue>> Refresh = (s) => { };
 
-        private readonly LinkedNodes<TKey> usageLinked = new LinkedNodes<TKey>();
+        private readonly LinkedDictionary<TKey, ValueNode<TKey, TValue>> usageDictionary = new LinkedDictionary<TKey, ValueNode<TKey, TValue>>();
+        private readonly LinkedDictionary<TKey, Node<TKey>> valueAgeDictionary = new LinkedDictionary<TKey, Node<TKey>>();
 
-        private readonly LinkedNodes<TKey> expireLinked = new LinkedNodes<TKey>();
+        private IValueResolver<TKey, TValue> resolver;
 
-        LinkedDictionary<TKey, ValueNode<TKey, TValue>> linkedDictionary = new LinkedDictionary<TKey, ValueNode<TKey, TValue>>();
-
-        private Node<TKey> expirationNodes = null;
-
-        private Func<TKey, TValue> resolver = null;
-
-        public TimeSpan EntityExpireIn { get; set; }
+        public TimeSpan? EntityExpiresIn { get; set; }
 
         public int Capacity { get; }
 
-        public int Count => dictionary.Count;
+        public int Count => usageDictionary.Count;
 
         public LimitedCache(int capacity)
-            : this(capacity, TimeSpan.FromHours(1))
-        {
-
-        }
-
-        public LimitedCache(int capacity, TimeSpan entityExpireIn)
         {
             this.Capacity = capacity;
-            this.EntityExpireIn = entityExpireIn;
+            this.EntityExpiresIn = null;
         }
 
-        public void SetResolver(Func<TKey, TValue> resolver)
+        public LimitedCache(int capacity, TimeSpan entityExpiresIn)
+            : this(capacity, entityExpiresIn, null)
+        {
+
+        }
+
+        public LimitedCache(int capacity, TimeSpan entityExpiresIn, IValueResolver<TKey, TValue> resolver)
+        {
+            this.Capacity = capacity;
+            this.EntityExpiresIn = entityExpiresIn;
+            this.resolver = resolver;
+        }
+
+        public void SetResolver(Func<TKey[], KeyValuePair<TKey, TValue>[]> resolver)
         {
             lock (this)
             {
-                this.resolver = resolver;
+                this.resolver = new ActionValueResolver<TKey, TValue>(resolver);
             }
         }
-
-        
 
         public void Clear(int capacity)
         {
             lock(this)
             {
-                foreach(var node in linkedDictionary.Ascending())
+                foreach(var node in usageDictionary.Ascending())
                 {
-                    if(linkedDictionary.Count > capacity)
+                    if(usageDictionary.Count > capacity)
                     {
-                        linkedDictionary.Remove(node);
+                        valueAgeDictionary.Remove(node.Key);
+                        usageDictionary.Remove(node);
                     }
-                }
-
-                while (dictionary.Count > capacity && dictionary.Count > 0)
-                {
-                    if (usageLinked.TryRemoveFirst(out var key))
-                        dictionary.Remove(key);
                 }
             }
         }
 
-        protected virtual void AddNew(TKey key, TValue value)
+        protected void AddNew(TKey key, TValue value)
         {
-            var newnode = new ValueNode<TKey, TValue>(key, value);
-            usageLinked.AddNode(newnode);
-            dictionary[key] = newnode;
-
-            var expNode = new Node<TKey>(key);
-            expireLinked.AddNode(expNode);
+            usageDictionary.Add(key, value);
+            valueAgeDictionary.Add(key);
 
             Clear(Capacity);
         }
 
-        public void Set(TKey key, TValue value)
+        public void Set(TKey key, TValue value, bool moveToEnd = true)
         {
             lock (this)
             {
-                if (dictionary.TryGetValue(key, out var node))
+                if (usageDictionary.TryGetNode(key, out var node))
                 {
-                    usageLinked.RemoveNode(node);
-                    usageLinked.AddNode(node);
+                    if(moveToEnd)
+                        usageDictionary.MoveToEnd(node);
+
                     node.Value = value;
                     node.UpdateTime = DateTime.Now;
+
+                    SetValueAge(key);
+
                     return;
                 }
                 else
@@ -96,16 +93,23 @@ namespace Borlay.Caches
             }
         }
 
+        protected void SetValueAge(TKey key)
+        {
+            if (valueAgeDictionary.TryGetNode(key, out var ageNode))
+            {
+                ageNode.UpdateTime = DateTime.Now;
+                valueAgeDictionary.MoveToEnd(ageNode);
+            }
+            else
+                valueAgeDictionary.Add(key);
+        }
+
         public void Remove(TKey key)
         {
             lock (this)
             {
-                if (dictionary.TryGetValue(key, out var node))
-                {
-                    usageLinked.RemoveNode(node);
-                    dictionary.Remove(key);
-                    return;
-                }
+                usageDictionary.Remove(key);
+                valueAgeDictionary.Remove(key);
             }
         }
 
@@ -120,53 +124,63 @@ namespace Borlay.Caches
             return TryResolveValue(key, null, out value);
         }
 
-        protected bool TryResolveValue(TKey key, Func<TKey, TValue> resolver, out TValue value)
+        protected bool TryResolveValue(TKey key, IValueResolver<TKey, TValue> resolver, out TValue value)
         {
             value = default(TValue);
 
             lock (this)
             {
-                if (dictionary.TryGetValue(key, out var node))
+                if (usageDictionary.TryGetNode(key, out var node))
                 {
-                    if (DateTime.Now.Subtract(node.UpdateTime) < EntityExpireIn)
+                    if (!EntityExpiresIn.HasValue || (node.UpdateTime.Add(EntityExpiresIn.Value) > DateTime.Now))
                     {
-                        usageLinked.RemoveNode(node);
-                        usageLinked.AddNode(node);
+                        usageDictionary.MoveToEnd(node);
                         value = node.Value;
                         return true;
                     }
                     else
                     {
-                        if (resolver == null)
+                        try
                         {
-                            dictionary.Remove(key);
-                            usageLinked.RemoveNode(node);
-                            return false;
-                        }
-                        var ResolveValuedValue = resolver(key);
+                            if (resolver == null)
+                                return false;
 
-                        usageLinked.RemoveNode(node);
-                        usageLinked.AddNode(node);
-                        node.Value = ResolveValuedValue;
-                        node.UpdateTime = DateTime.Now;
-                        value = ResolveValuedValue;
-                        return true;
+                            if (!resolver.TryResolveValue(key, out var resolvedValue))
+                                return false;
+
+                            value = resolvedValue;
+
+                            node.Value = resolvedValue;
+                            node.UpdateTime = DateTime.Now;
+                            usageDictionary.MoveToEnd(node);
+
+                            SetValueAge(key);
+
+                            return true;
+                        }
+                        finally
+                        {
+                            Refresh(this);
+                        }
                     }
                 }
                 else
                 {
-                    if (resolver == null) return false;
-                    var ResolveValuedValue = resolver(key);
+                    if (resolver == null)
+                        return false;
 
-                    AddNew(key, ResolveValuedValue);
-                    value = ResolveValuedValue;
+                    if (!resolver.TryResolveValue(key, out var resolvedValue))
+                        return false;
+
+                    AddNew(key, resolvedValue);
+                    value = resolvedValue;
                     return true;
                 }
             }
         }
 
         /// <summary>
-        /// Tries to get value and if not exist tries to ResolveValue with ResolveValuer.
+        /// Tries to get value and if not exist tries to resolve value via IValueResolver.
         /// </summary>
         /// <param name="key">Key</param>
         /// <param name="value">Value</param>
@@ -181,15 +195,17 @@ namespace Borlay.Caches
             return ResolveValue(key, this.resolver);
         }
 
-        public TValue ResolveValue(TKey key, Func<TKey, TValue> resolver)
+        public TValue ResolveValue(TKey key, IValueResolver<TKey, TValue> resolver)
         {
-            if (resolver == null)
-                throw new ArgumentNullException(nameof(resolver));
-
             if (TryResolveValue(key, resolver, out var value))
                 return value;
             else
                 throw new Exception("Cannot ResolveValue value");
+        }
+
+        public IEnumerable<IValueAge<TKey>> GetValueAges()
+        {
+            return valueAgeDictionary.Ascending();
         }
 
         public TValue this[TKey key]
@@ -200,21 +216,8 @@ namespace Borlay.Caches
             }
             get
             {
-                if (TryGetValue(key, out var value))
-                    return value;
-
-                throw new KeyNotFoundException($"Key '{key}' not found in the {nameof(LimitedCache<TKey, TValue>)}");
+                return ResolveValue(key);
             }
         }
-    }
-
-    public interface ICacheResolve<TKey, TValue>
-    {
-        void Set(TKey key, TValue value);
-
-        TValue ResolveValue(TKey key);
-        bool TryResolveValue(TKey key, out TValue value);
-
-        void Remove(TKey key);
     }
 }

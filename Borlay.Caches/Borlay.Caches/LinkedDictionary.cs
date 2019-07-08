@@ -38,10 +38,28 @@ namespace Borlay.Caches
             return dictionary.TryGetValue(key, out node);
         }
 
-        public virtual void Add(TNode newnode)
+
+        public void MoveToEnd(TNode node)
         {
-            linked.AddNode(newnode);
-            dictionary[newnode.Key] = newnode;
+            linked.RemoveNode(node);
+            linked.AddNode(node);
+        }
+
+        public bool MoveToEnd(TKey key)
+        {
+            if (TryGetNode(key, out var node))
+            {
+                Remove(node);
+                Add(node);
+                return true;
+            }
+            return false;
+        }
+
+        public virtual void Add(TNode node)
+        {
+            linked.AddNode(node);
+            dictionary[node.Key] = node;
         }
 
         public bool Remove(TKey key)
