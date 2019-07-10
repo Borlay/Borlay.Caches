@@ -40,7 +40,7 @@ namespace Borlay.Caches
 
             try
             {
-                var datenow = DateTime.Now;
+                var datenow = DateTime.Now.AddMinutes(10);
                 var keys = cache.GetValueAges()
                     .TakeWhile(e => e.UpdateTime.Add(UpdateExpiredIn) < datenow)
                     .Take(TakeCount*100).Select(e => e.Key).ToArray().AsEnumerable();

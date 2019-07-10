@@ -78,7 +78,7 @@ namespace Borlay.Caches.Tests
         [TestMethod]
         public void LimitedCacheTest()
         {
-            var cache = new LimitedCache<string, string>(10);
+            var cache = new Cache<string, string>(10);
 
             cache.Set($"k-0", $"v-0");
             cache.Set($"k-1", $"v-1");
@@ -120,7 +120,7 @@ namespace Borlay.Caches.Tests
         [TestMethod]
         public void ExpireEntityTest()
         {
-            var cache = new LimitedCache<string, string>(10, TimeSpan.FromMilliseconds(500));
+            var cache = new Cache<string, string>(10, TimeSpan.FromMilliseconds(500));
 
             cache.Set($"k-0", $"v-0");
             cache.Set($"k-1", $"v-1");
@@ -145,7 +145,7 @@ namespace Borlay.Caches.Tests
         [TestMethod]
         public void ExpireEntityExistTest()
         {
-            var cache = new LimitedCache<string, string>(10, TimeSpan.FromMilliseconds(2000));
+            var cache = new Cache<string, string>(10, TimeSpan.FromMilliseconds(2000));
 
             cache.Set($"k-0", $"v-0");
             cache.Set($"k-1", $"v-1");

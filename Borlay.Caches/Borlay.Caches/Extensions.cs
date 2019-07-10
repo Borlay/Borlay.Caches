@@ -17,9 +17,9 @@ namespace Borlay.Caches
             dictionary.Add(new ValueNode<TKey, TValue>(keyValue.Key, keyValue.Value));
         }
 
-        public static void Add<TKey>(this LinkedDictionary<TKey, Node<TKey>> dictionary, TKey key)
+        public static void Add<TKey>(this LinkedDictionary<TKey, Node<TKey>> dictionary, TKey key, DateTime dateTime)
         {
-            dictionary.Add(new Node<TKey>(key));
+            dictionary.Add(new Node<TKey>(key) { UpdateTime = dateTime });
         }
 
         public static bool TryResolveValue<TKey, TValue>(this IValueResolver<TKey, TValue> resolver, TKey key, out TValue value)
