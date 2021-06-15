@@ -10,6 +10,24 @@ namespace Borlay.Caches.Tests
     public class CacheTests
     {
         [TestMethod]
+        public void PerformanceTest()
+        {
+            var cache = new Borlay.Caches.Cache<Guid, string>(100000);
+
+            var watch = Stopwatch.StartNew();
+            
+            for (int i = 0; i < 1000 * 1000; i++)
+            {
+                var guid = Guid.NewGuid();
+                var value = $"value of {i}";
+                cache.Set(guid, value);
+            }
+
+            watch.Stop();
+            watch.Restart();
+        }
+
+        [TestMethod]
         public void LinkedAscDescTest()
         {
             var linked = new LinkedNodes<int>();

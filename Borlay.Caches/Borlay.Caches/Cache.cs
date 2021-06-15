@@ -59,11 +59,12 @@ namespace Borlay.Caches
             {
                 foreach(var node in usageDictionary.Ascending())
                 {
-                    if(usageDictionary.Count > capacity)
+                    if (usageDictionary.Count > capacity)
                     {
                         valueAgeDictionary.Remove(node.Key);
                         usageDictionary.Remove(node);
                     }
+                    else break;
                 }
             }
         }
@@ -82,7 +83,7 @@ namespace Borlay.Caches
             {
                 if (usageDictionary.TryGetNode(key, out var node))
                 {
-                    if(moveToEnd)
+                    if (moveToEnd)
                         usageDictionary.MoveToEnd(node);
 
                     var dateTime = DateTime.Now;
