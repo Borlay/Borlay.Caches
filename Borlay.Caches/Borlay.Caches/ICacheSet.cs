@@ -7,7 +7,7 @@ namespace Borlay.Caches
     public interface ICacheSet<TKey, TValue>
     {
         void Set(TKey key, TValue value, bool moveToEnd = true);
-
+        void SetMany(KeyValuePair<TKey, TValue>[] values, bool moveToEnd = true);
         void Remove(TKey key);
     }
 }

@@ -22,7 +22,7 @@ namespace Borlay.Caches
             dictionary.Add(new Node<TKey>(key) { UpdateTime = dateTime });
         }
 
-        public static bool TryResolveValue<TKey, TValue>(this IValueResolver<TKey, TValue> resolver, TKey key, out TValue value)
+        /*public static bool TryResolveValue<TKey, TValue>(this IValueResolver<TKey, TValue> resolver, TKey key, out TValue value)
         {
             value = default(TValue);
             var keyPairs = resolver.Resolve(key);
@@ -33,15 +33,37 @@ namespace Borlay.Caches
             var resolvedValue = keyPairs.Single(k => k.Key.Equals(key)).Value;
             value = resolvedValue;
             return true;
+        }*/
+
+        public static void SetResolver<TKey, TValue>(this ICache<TKey, TValue> cache, Func<TKey, TValue> resolver) where TValue : class
+        {
+            cache.SetResolver(new ActionValueResolver<TKey, TValue>(resolver));
         }
 
-        public static TValue ResolveValue<TKey, TValue>(this ICache<TKey, TValue> cache, TKey key, Func<TKey, TValue> resolverFunc)
+        public static TValue ResolveValue<TKey, TValue>(this ICache<TKey, TValue> cache, TKey key, Func<TKey, TValue> resolverFunc) where TValue: class
         {
-            return cache.ResolveValue(key, new ActionValueResolver<TKey, TValue>(keys =>
+            return cache.ResolveValue(key, new ActionValueResolver<TKey, TValue>(k =>
             {
-                var value = resolverFunc(key);
-                return new KeyValuePair<TKey, TValue>[] { new KeyValuePair<TKey, TValue>(key, value) };
+                return resolverFunc(k);
             }));
+        }
+
+        public static IEnumerable<T[]> Batches<T>(this IEnumerable<T> keys, int batchSize)
+        {
+            var queue = new Queue<T>();
+            foreach(var key in keys)
+            {
+                queue.Enqueue(key);
+                if(queue.Count == batchSize)
+                {
+                    var batch = queue.ToArray();
+                    queue.Clear();
+                    yield return batch;
+                }
+            }
+
+            if(queue.Count > 0)
+                yield return queue.ToArray();
         }
     }
 }

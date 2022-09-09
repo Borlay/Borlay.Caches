@@ -7,7 +7,7 @@ namespace Borlay.Caches
 {
     public class Cache<TKey, TValue> : ICache<TKey, TValue>, ICacheRefresh<TKey, TValue>
     {
-        public event Action<ICacheRefresh<TKey, TValue>> Refresh = (s) => { };
+        //public event Action<ICacheRefresh<TKey, TValue>> Refresh = (s) => { };
 
         private readonly LinkedDictionary<TKey, ValueNode<TKey, TValue>> usageDictionary = new LinkedDictionary<TKey, ValueNode<TKey, TValue>>();
         private readonly LinkedDictionary<TKey, Node<TKey>> valueAgeDictionary = new LinkedDictionary<TKey, Node<TKey>>();
@@ -45,11 +45,11 @@ namespace Borlay.Caches
             this.resolver = resolver;
         }
 
-        public void SetResolver(Func<TKey[], KeyValuePair<TKey, TValue>[]> resolver)
+        public void SetResolver(IValueResolver<TKey, TValue> resolver)
         {
             lock (this)
             {
-                this.resolver = new ActionValueResolver<TKey, TValue>(resolver);
+                this.resolver = resolver;
             }
         }
 
@@ -75,6 +75,34 @@ namespace Borlay.Caches
             valueAgeDictionary.Add(key, DateTime.Now);
 
             Clear(Capacity);
+        }
+
+        public void SetMany(KeyValuePair<TKey, TValue>[] values, bool moveToEnd = true)
+        {
+            lock (this)
+            {
+                foreach (var kv in values)
+                {
+                    if (usageDictionary.TryGetNode(kv.Key, out var node))
+                    {
+                        if (moveToEnd)
+                            usageDictionary.MoveToEnd(node);
+
+                        var dateTime = DateTime.Now;
+
+                        node.Value = kv.Value;
+                        node.UpdateTime = dateTime;
+
+                        SetValueAge(kv.Key, dateTime);
+
+                        return;
+                    }
+                    else
+                    {
+                        AddNew(kv.Key, kv.Value);
+                    }
+                }
+            }
         }
 
         public void Set(TKey key, TValue value, bool moveToEnd = true)
@@ -149,30 +177,23 @@ namespace Borlay.Caches
                     }
                     else
                     {
-                        try
-                        {
-                            if (resolver == null)
-                                return false;
+                        if (resolver == null)
+                            return false;
 
-                            if (!resolver.TryResolveValue(key, out var resolvedValue))
-                                return false;
+                        if (!resolver.TryResolve(key, out var resolvedValue))
+                            return false;
 
-                            value = resolvedValue;
+                        value = resolvedValue;
 
-                            var dateTime = DateTime.Now;
+                        var dateTime = DateTime.Now;
 
-                            node.Value = resolvedValue;
-                            node.UpdateTime = dateTime;
-                            usageDictionary.MoveToEnd(node);
+                        node.Value = resolvedValue;
+                        node.UpdateTime = dateTime;
+                        usageDictionary.MoveToEnd(node);
 
-                            SetValueAge(key, dateTime);
+                        SetValueAge(key, dateTime);
 
-                            return true;
-                        }
-                        finally
-                        {
-                            Refresh(this);
-                        }
+                        return true;
                     }
                 }
                 else
@@ -180,7 +201,7 @@ namespace Borlay.Caches
                     if (resolver == null)
                         return false;
 
-                    if (!resolver.TryResolveValue(key, out var resolvedValue))
+                    if (!resolver.TryResolve(key, out var resolvedValue))
                         return false;
 
                     AddNew(key, resolvedValue);
@@ -211,12 +232,15 @@ namespace Borlay.Caches
             if (TryResolveValue(key, resolver, out var value))
                 return value;
             else
-                throw new Exception("Cannot ResolveValue value");
+                throw new Exception($"Cannot resolve value for '{key}'");
         }
 
-        public IEnumerable<IValueAge<TKey>> GetValueAges()
+        public TKey[] GetAscendingWhile(Func<IValueAge<TKey>, bool> predicate, int count)
         {
-            return valueAgeDictionary.Ascending();
+            lock (this)
+            {
+                return valueAgeDictionary.Ascending().TakeWhile(predicate).Select(e => e.Key).Take(count).ToArray();
+            }
         }
 
         public TValue this[TKey key]
@@ -234,27 +258,51 @@ namespace Borlay.Caches
 
     public static class Cache
     {
-        public static Cache<TKey, TValue> Create<TKey, TValue>(int capacity, TimeSpan entityExpiresIn, IValueResolver<TKey, TValue> resolver, int updateTakeCount = 1000)
+        public static CacheUpdater<TKey, TValue> CreateUpdater<TKey, TValue>(this ICacheRefresh<TKey, TValue> cache, TimeSpan updateExpired, TimeSpan refreshPeriod, int takeCount, IValueResolverAsync<TKey, TValue> resolver)
         {
-            var cache = new Cache<TKey, TValue>(capacity, entityExpiresIn, resolver);
-            var updater = new CacheUpdater<TKey, TValue>(cache, resolver, entityExpiresIn, updateTakeCount);
-
-            return cache;
+            var updater = new CacheUpdater<TKey, TValue>(cache, resolver, updateExpired, refreshPeriod, takeCount);
+            return updater;
         }
 
-        public static Cache<TKey, TValue> Create<TKey, TValue>(int capacity, TimeSpan entityExpiresIn, Func<TKey[], KeyValuePair<TKey, TValue>[]> resolverAction, int updateTakeCount = 1000)
+        public static CacheUpdater<TKey, TValue> CreateUpdater<TKey, TValue>(this ICacheRefresh<TKey, TValue> cache, TimeSpan refreshPeriod, int takeCount, IValueResolverAsync<TKey, TValue> resolver)
+        {
+            var updater = new CacheUpdater<TKey, TValue>(cache, resolver, 
+                cache.EntityExpiresIn ?? throw new Exception("Entity expiration in Cache is not set"), 
+                refreshPeriod, takeCount);
+
+            return updater;
+        }
+
+        public static CacheUpdater<TKey, TValue> CreateUpdater<TKey, TValue>(this ICacheRefresh<TKey, TValue> cache, TimeSpan updateExpired, TimeSpan refreshPeriod, int takeCount, 
+            Func<TKey[], Task<KeyValuePair<TKey, TValue>[]>> resolverAction)
+        {
+            var resolver = new ActionValueResolverAsync<TKey, TValue>(resolverAction);
+            var updater = new CacheUpdater<TKey, TValue>(cache, resolver, updateExpired, refreshPeriod, takeCount);
+            return updater;
+        }
+
+        public static CacheUpdater<TKey, TValue> CreateUpdater<TKey, TValue>(this ICacheRefresh<TKey, TValue> cache, TimeSpan refreshPeriod, int takeCount, 
+            Func<TKey[], Task<KeyValuePair<TKey, TValue>[]>> resolverAction)
+        {
+            var resolver = new ActionValueResolverAsync<TKey, TValue>(resolverAction);
+
+            var updater = new CacheUpdater<TKey, TValue>(cache, resolver,
+                cache.EntityExpiresIn ?? throw new Exception("Entity expiration in Cache is not set"),
+                refreshPeriod, takeCount);
+
+            return updater;
+        }
+
+        public static Cache<TKey, TValue> Create<TKey, TValue>(int capacity, TimeSpan entityExpiresIn, Func<TKey, TValue> resolverAction) where TValue : class
         {
             var resolver = new ActionValueResolver<TKey, TValue>(resolverAction);
-            return Create<TKey, TValue>(capacity, entityExpiresIn, resolver, updateTakeCount);
+            return new Cache<TKey, TValue>(capacity, entityExpiresIn, resolver);
         }
 
-        public static Cache<TKey, TValue> Create<TKey, TValue>(int capacity, Func<TKey, TValue> resolverAction)
+        public static Cache<TKey, TValue> Create<TKey, TValue>(int capacity, Func<TKey, TValue> resolverAction) where TValue : class
         {
-            var resolver = new ActionValueResolver<TKey, TValue>((keys) =>
-                keys.Select(k => new KeyValuePair<TKey, TValue>(k, resolverAction(k))).ToArray());
-
-            var cache = new Cache<TKey, TValue>(capacity, resolver);
-            return cache;
+            var resolver = new ActionValueResolver<TKey, TValue>(resolverAction);
+            return new Cache<TKey, TValue>(capacity, resolver);
         }
     }
 }

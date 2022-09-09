@@ -9,5 +9,6 @@ namespace Borlay.Caches
         TValue ResolveValue(TKey key);
         bool TryResolveValue(TKey key, out TValue value);
         TValue ResolveValue(TKey key, IValueResolver<TKey, TValue> resolver);
+        void SetResolver(IValueResolver<TKey, TValue> resolver);
     }
 }

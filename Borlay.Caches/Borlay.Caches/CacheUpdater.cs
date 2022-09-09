@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 
 namespace Borlay.Caches
@@ -9,70 +10,70 @@ namespace Borlay.Caches
     public class CacheUpdater<TKey, TValue>
     {
         private readonly ICacheRefresh<TKey, TValue> cache;
-        private readonly IValueResolver<TKey, TValue> valueResolver;
+        private readonly IValueResolverAsync<TKey, TValue> valueResolver;
 
         public TimeSpan UpdateExpiredIn { get; set; }
-        public int TakeCount { get; set; }
+        public TimeSpan RefreshPeriod { get; set; }
+        public int UpdateBatchSize { get; set; }
 
         public volatile bool updating = false;
 
-        public CacheUpdater(ICacheRefresh<TKey, TValue> cache, IValueResolver<TKey, TValue> valueResolver,
-            TimeSpan updateExpiredIn, int takeCount)
+        public Action<string> Log { get; set; } = null;
+
+        public CacheUpdater(ICacheRefresh<TKey, TValue> cache, IValueResolverAsync<TKey, TValue> valueResolver,
+            TimeSpan updateExpiredIn, TimeSpan refreshPeriod, int updateBatchSize)
         {
             this.cache = cache ?? throw new ArgumentNullException(nameof(cache));
             this.valueResolver = valueResolver ?? throw new ArgumentNullException(nameof(valueResolver));
 
-            if (takeCount <= 0)
-                throw new ArgumentException($"{nameof(takeCount)} cannot be 0 or less");
+            if (updateBatchSize <= 0)
+                throw new ArgumentException($"{nameof(updateBatchSize)} cannot be 0 or less");
 
             this.UpdateExpiredIn = updateExpiredIn;
-            this.TakeCount = takeCount;
-
-            this.cache.Refresh += Cache_Refresh;
-
-            
+            this.RefreshPeriod = refreshPeriod;
+            this.UpdateBatchSize = updateBatchSize;
         }
 
-        public virtual async void Cache_Refresh(ICacheRefresh<TKey, TValue> cache)
+        public virtual async void Run(CancellationToken cancellationToken)
         {
-            if (updating) return;
-            updating = true;
+            await Task.Delay(RefreshPeriod);
 
-            try
+            while (!cancellationToken.IsCancellationRequested)
             {
-                var datenow = DateTime.Now.AddMinutes(10);
-                var keys = cache.GetValueAges()
-                    .TakeWhile(e => e.UpdateTime.Add(UpdateExpiredIn) < datenow)
-                    .Take(TakeCount*100).Select(e => e.Key).ToArray().AsEnumerable();
+                await Task.Delay(TimeSpan.FromMinutes(1));
 
-                await Task.Factory.StartNew(() =>
+                var datenow = DateTime.Now.Add(RefreshPeriod).AddMinutes(1);
+
+                var expiredKeys = cache.GetAscendingWhile(e => e.UpdateTime.Add(UpdateExpiredIn) < datenow, UpdateBatchSize);
+                Log?.Invoke($"Expired Keys: {expiredKeys.Length}");
+                if (expiredKeys.Length == 0)
                 {
-                    try
+                    await Task.Delay(RefreshPeriod);
+                    continue;
+                }
+
+                var values = await valueResolver.ResolveAsync(expiredKeys);
+                if(values == null || values.Length == 0)
+                {
+                    Log?.Invoke($"Nothing updated");
+
+                    await Task.Delay(RefreshPeriod);
+                    continue;
+                }
+                cache.SetMany(values, false);
+
+                Log?.Invoke($"Cache updated. Count: {values.Length}");
+
+                if(values.Length != expiredKeys.Length)
+                {
+                    var notFound = expiredKeys.Where(k => !values.Any(v => k.Equals(v.Key))).ToArray();
+                    Log?.Invoke($"Not found: {notFound.Length}");
+
+                    foreach (var notfoundKey in notFound)
                     {
-                        while (true)
-                        {
-                            var updateKeys = keys.Take(TakeCount).ToArray();
-                            keys = keys.Skip(TakeCount);
-
-                            if (updateKeys.Count() <= 0) break;
-
-                            var keyPairs = valueResolver.Resolve(updateKeys);
-
-                            foreach (var keyPair in keyPairs)
-                            {
-                                cache.Set(keyPair.Key, keyPair.Value, false);
-                            }
-                        }
+                        cache.Remove(notfoundKey);
                     }
-                    finally
-                    {
-                        updating = false;
-                    }
-                });
-            }
-            finally
-            {
-                updating = false;
+                }
             }
         }
     }

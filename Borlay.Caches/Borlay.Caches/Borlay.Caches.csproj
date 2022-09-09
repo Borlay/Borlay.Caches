@@ -10,7 +10,7 @@
     <RepositoryUrl>https://github.com/Borlay/Borlay.Caches.git</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
     <PackageTags>Limited Cache Key value</PackageTags>
-    <Version>1.1.0</Version>
+    <Version>1.2.0</Version>
   </PropertyGroup>
 
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|AnyCPU'">

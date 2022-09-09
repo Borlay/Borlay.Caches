@@ -6,8 +6,7 @@ namespace Borlay.Caches
 {
     public interface ICacheRefresh<TKey, TValue> : ICacheSet<TKey, TValue>
     {
-        event Action<ICacheRefresh<TKey, TValue>> Refresh;
-
-        IEnumerable<IValueAge<TKey>> GetValueAges();
+        TimeSpan? EntityExpiresIn { get; }
+        TKey[] GetAscendingWhile(Func<IValueAge<TKey>, bool> predicate, int count);
     }
 }
